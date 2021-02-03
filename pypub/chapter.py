@@ -312,6 +312,7 @@ class ChapterGithubGistFactory(ChapterFactory):
     GIST_NETLOC = 'gist.github.com'
     GIST_BLOB_NUM = 'blob-num'
     GIST_BLOB_CODE = 'blob-code'
+    GIST_META = 'gist-meta'
     REGEX_DOCWRITE = re.compile(r"document.write\('(.+)'\)")
 
     def create_chapter_from_string(self, html_string, url=None, title=None):
@@ -374,7 +375,13 @@ class ChapterGithubGistFactory(ChapterFactory):
         for line, code in lines:
             gist.append('{1:>{0}}: {2}'.format(len(last_line) + 1, line, code))
         gist.append('</pre>')
-        return BeautifulSoup(os.linesep.join(gist), 'html.parser')
+        gist_soup = BeautifulSoup(os.linesep.join(gist), 'html.parser')
+        meta = soup.find('div', class_=self.GIST_META)
+        try:
+            gist_soup.append(meta)
+        except ValueError:
+            pass
+        return gist_soup
 
 
 create_chapter_from_url = ChapterGithubGistFactory().create_chapter_from_url
