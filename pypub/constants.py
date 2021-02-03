@@ -30,6 +30,7 @@ SUPPORTED_TAGS = {
     'li': ['class', 'id', 'title'],
     'ol': ['id'],
     'p': ['align', 'id', 'title'],
+    'pre': ['style'],
     's': ['id', 'style', 'title'],
     'small': ['id'],
     'span': ['bgcolor', 'title'],

@@ -6,10 +6,10 @@ except ImportError:
 import codecs
 import imghdr
 import os
+import re
 import shutil
 import tempfile
 import urllib.request, urllib.parse, urllib.error
-import urllib.parse
 import uuid
 
 import bs4
@@ -192,19 +192,20 @@ class Chapter(object):
 
     def _get_image_urls(self):
         image_nodes = self._content_tree.find_all('img')
-        raw_image_urls = [node['src'] for node in image_nodes if node.has_attr('src')]
-        full_image_urls = [urllib.parse.urljoin(self.url, image_url) for image_url in raw_image_urls]
-        image_nodes_filtered = [node for node in image_nodes if node.has_attr('src')]
+        image_nodes_filtered = [node for node in image_nodes
+                                if node.has_attr('src')]
+        raw_image_urls = [node['src'] for node in image_nodes_filtered]
+        full_image_urls = [urllib.parse.urljoin(self.url, img['src'])
+                           for img in image_nodes_filtered]
         return list(zip(image_nodes_filtered, full_image_urls))
 
     def _replace_images_in_chapter(self, ebook_folder):
         image_url_list = self._get_image_urls()
         for image_tag, image_url in image_url_list:
             _replace_image(image_url, image_tag, ebook_folder)
-        unformatted_html_unicode_string = str(self._content_tree.prettify(encoding='utf-8',
-                                                                              formatter=EntitySubstitution.substitute_html),
-                                                  encoding='utf-8')
-        unformatted_html_unicode_string = unformatted_html_unicode_string.replace('<br>', '<br/>')
+        unformatted_html_unicode_string = str(self._content_tree)
+        unformatted_html_unicode_string = unformatted_html_unicode_string.\
+            replace('<br>', '<br/>')
         self.content = unformatted_html_unicode_string
 
 
@@ -297,20 +298,86 @@ class ChapterFactory(object):
         """
         clean_html_string = self.clean_function(html_string)
         clean_xhtml_string = clean.html_to_xhtml(clean_html_string)
-        if title:
-            pass
-        else:
+        if title is None:
             try:
                 root = BeautifulSoup(html_string, 'html.parser')
                 title_node = root.title
-                if title_node is not None:
-                    title = str(title_node.string)
-                else:
-                    raise ValueError
-            except (IndexError, ValueError):
+                title = title_node.string
+            except (IndexError, AttributeError):
                 title = 'Ebook Chapter'
         return Chapter(clean_xhtml_string, title, url)
 
-create_chapter_from_url = ChapterFactory().create_chapter_from_url
-create_chapter_from_file = ChapterFactory().create_chapter_from_file
-create_chapter_from_string = ChapterFactory().create_chapter_from_string
+
+class ChapterGithubGistFactory(ChapterFactory):
+    GIST_NETLOC = 'gist.github.com'
+    GIST_BLOB_NUM = 'blob-num'
+    GIST_BLOB_CODE = 'blob-code'
+    REGEX_DOCWRITE = re.compile(r"document.write\('(.+)'\)")
+
+    def create_chapter_from_string(self, html_string, url=None, title=None):
+        """
+        Creates a Chapter object from a string, fetching Github Javascript
+        to include the code hosted on Github. Sanitizes the string using the
+        clean_function method, and saves it as the content of the created chapter.
+
+        Args:
+            html_string (string): The html or xhtml content of the created
+                Chapter
+            title (Option[string]): The title of the created Chapter. By
+                default, this is None, in which case the title will try to be
+                inferred from the webpage at the url.
+
+        Returns:
+            Chapter: A chapter object whose content is the given string
+                and whose title is that provided or inferred from the url
+        """
+        soup = BeautifulSoup(html_string, 'html.parser')
+        for script in soup.find_all('script'):
+            try:
+                url = script['src']
+                if urllib.parse.urlparse(url).netloc != self.GIST_NETLOC:
+                    continue
+                script.replace_with(self.process_gist(url))
+            except KeyError:
+                continue
+        return super().create_chapter_from_string(str(soup), url, title)
+
+    def process_gist(self, gist_link):
+        """
+        Loads the Github Gist from its link, and transforms it into a formatted
+        text. The code is in a table format, which does not allow keeping the
+        code indentation spaces, so it is convert as a 'pre' block.
+
+        Args:
+            gist_link (string): the link to the Github Gist.
+
+        Returns:
+            A BeautifulSoup of the Gist content, formatted as a 'pre' block.
+        """
+        req = requests.get(gist_link, headers=self.request_headers,
+                           allow_redirects=True)
+        req.raise_for_status()
+        gist_data = req.text
+        new_content = ''
+        for match in self.REGEX_DOCWRITE.finditer(gist_data):
+            new_content += codecs.decode(
+                match.group(1).replace('\\/', '/'), 'unicode-escape')
+        soup = BeautifulSoup(new_content, 'html.parser')
+        lines = []
+        last_line = 0
+        for trow in soup.find_all('tr'):
+            tdiv_line = trow.find('td', class_=self.GIST_BLOB_NUM)
+            tdiv_code = trow.find('td', class_=self.GIST_BLOB_CODE)
+            lines.append((tdiv_line['data-line-number'], tdiv_code.text))
+            last_line = tdiv_line['data-line-number']
+        gist = ['<pre style="font-size: 80%;">']
+        for line, code in lines:
+            gist.append('{1:>{0}}: {2}'.format(len(last_line) + 1, line, code))
+        gist.append('</pre>')
+        return BeautifulSoup(os.linesep.join(gist), 'html.parser')
+
+
+create_chapter_from_url = ChapterGithubGistFactory().create_chapter_from_url
+create_chapter_from_file = ChapterGithubGistFactory().create_chapter_from_file
+create_chapter_from_string = ChapterGithubGistFactory().\
+    create_chapter_from_string

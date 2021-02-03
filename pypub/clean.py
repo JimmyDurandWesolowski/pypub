@@ -86,9 +86,7 @@ def clean(input_string,
     for node in image_node_list:
         if not node.has_attr('src'):
             node.extract()
-    unformatted_html_unicode_string = str(root.prettify(encoding='utf-8',
-                                                            formatter=EntitySubstitution.substitute_html),
-                                              encoding='utf-8')
+    unformatted_html_unicode_string = str(root)
     # fix <br> tags since not handled well by default by bs4
     unformatted_html_unicode_string = unformatted_html_unicode_string.replace('<br>', '<br/>')
     # remove &nbsp; and replace with space since not handled well by certain e-readers
@@ -144,7 +142,7 @@ def html_to_xhtml(html_unicode_string):
                          'string is the following: %s', str(root)]))
     # Add xmlns attribute to html node
     root.html['xmlns'] = 'http://www.w3.org/1999/xhtml'
-    unicode_string = str(root.prettify(encoding='utf-8', formatter='html'), encoding='utf-8')
+    unicode_string = str(root)
     # Close singleton tag_dictionary
     for tag in constants.SINGLETON_TAG_LIST:
         unicode_string = unicode_string.replace(
